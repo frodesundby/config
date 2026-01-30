@@ -7,6 +7,8 @@ export path=(
 ~/opt/bin
 ~/opt/kubebuilder_2.3.1_darwin_amd64/bin
 ~/.krew/bin
+~/.cargo/bin
+/Applications/Ghostty.app/Contents/MacOS
 $path
 )
 
@@ -32,7 +34,7 @@ ZSH_THEME="avit"
 # Which plugins would you like to load? (plugins can be found in ~/.oh-my-zsh/plugins/*)
 # Custom plugins may be added to ~/.oh-my-zsh/custom/plugins/
 export TERM=xterm-256color
-plugins=(git kubectl asdf )
+plugins=(git kubectl )
 
 source $ZSH/oh-my-zsh.sh
 
@@ -50,18 +52,21 @@ bindkey '^h' backward-delete-char
 bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
+alias up="admin"
+alias kk="get_pods"
 alias grw="gh run watch"
 alias ndl="k logs -n nais-system -l app.kubernetes.io/instance=naisd"
-alias t="tenant_fzf"
+alias t="ctx_switch"
 alias reset_onprem_kube_token="yq eval -i 'del(.users[] | select(.name == \"nais-user\") | .user.auth-provider.config.access-token)' ~/ws/kubeconfigs/config"
 alias unifi="ssh svadapi.ddns.net -p 4242 -L 8443:unifi:8443"
 alias uk="cd ~/ws/kubeconfigs; git pull origin master; cd -"
 alias temp="cd ~/ws/temp"
 alias k="kubectl $@"
 alias kc="kubectx"
-alias kns=kubens
+alias kns="kubens $@"
 alias ks="kubectl -n kube-system"
 alias ws="cd ~/ws"
+alias ww="cd ~/docs"
 alias mm="rdp a01t9vw040.adeo.no"
 alias sz="source ~/.zshrc"
 alias ez="vi ~/.zshrc"
@@ -81,21 +86,19 @@ alias wl='watch kubectl logs $1 $2'
 alias github='gh repo view --web'
 alias gcp='gcloud_set_project_fzf'
 alias glo='gcloud auth login --update-adc'
-alias xgcloud='gcloud_command_with_project_fzf'
 alias check='check_adhoc'
 alias stripx='sudo xattr -d -r com.apple.quarantine'
 
 # Functions
-KUBENS_BINARY=/usr/local/bin/kubens
-kubens_fzf() {
-    ${KUBENS_BINARY} $(${KUBENS_BINARY} | fzf -1 --ansi -q ${1:-""})
-    tmux refresh-client -S
-}
+#KUBENS_BINARY=/usr/local/bin/kubens
+#kubens_fzf() {
+#    ${KUBENS_BINARY} $(${KUBENS_BINARY} | fzf -1 --ansi -q ${1:-""})
+#    tmux refresh-client -S
+#}
 
-gcloud_command_with_project_fzf() {
-  gcloud "$@" --project $(gcloud projects list --format="get(projectId)" | fzf )
+admin() {
+  narc jita grant admin $(narc tenant list | fzf) --duration $(for i (30m 1h 2h 3h 4h); do echo $i; done | fzf)
 }
-
 
 gotestcover() {
   outFile=$(mktemp)
@@ -103,16 +106,24 @@ gotestcover() {
   go tool cover -html=$outFile
 }
 
-kall () {
+kall() {
   for cluster in dev-gcp dev-fss dev-sbs prod-gcp prod-sbs prod-fss labs-gcp; do
     kubectl $@ --context $cluster
   done
 }
 
+get_pods() {
+    if [[ $# -eq 0 ]]; then
+        kubectl get pods
+    else
+        kubectl get pods "${(@)argv[2,-1]}" | grep "$1"
+    fi
+}
 
 check_adhoc () {
   k exec -it $1 -- wget -q -O- localhost:8080/adhoc | head -n3 | tail -n1 | jq -r .markdown
 }
+
 gcloud_set_project_fzf () {
     gcloud config set project $(gcloud projects list --format="get(projectId)" | fzf -1 --ansi -q ${1:-""}); 
     tmux refresh-client -S
@@ -124,23 +135,29 @@ testrig() {
   curl localhost:8069/adhoc | jq -r .
 }
 
-tenant_fzf () {
-    nais device tenant $(echo -e "NAV\n$(gsutil ls gs://naisdevice-enroll-discovery | awk -F "/" '{print $4}')" | fzf -1 -q ${1:-""})
-    nais device connect
+resyncApps () {
+for ns in $(kubectl get ns -o name|cut -d'/' -f2); do
+  echo $ns
+  for app in $(kubectl get app -n $ns -o name); do
+    echo $app
+    kubectl patch app "$(echo $app|cut -d'/' -f2)" --type=json -p '[{"op": "remove", "path": "/status/synchronizationHash"}]' -n $ns
+  done
+done
+}
+
+ctx_switch() {
+  selected_tenant="$(narc tenant list | fzf -1 -q "${1:-""}")"
+	narc tenant set $selected_tenant
+  nais device connect
 }
 
 for i in `seq 1 9`; do
     alias p$i="awk '{ print \$$i; }'"
 done
 
-# GH
-#autoload -U compinit
-#compinit -i
-
 # Sources
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-autoload -U +X bashcompinit && bashcompinit
 complete -o nospace -C /usr/local/bin/vault vault
 
 
@@ -150,4 +167,6 @@ if [ -f '/Users/frodesundby/opt/google-cloud-sdk/path.zsh.inc' ]; then . '/Users
 # The next line enables shell command completion for gcloud.
 if [ -f '/Users/frodesundby/opt/google-cloud-sdk/completion.zsh.inc' ]; then . '/Users/frodesundby/opt/google-cloud-sdk/completion.zsh.inc'; fi
 
-export PATH="$HOME/.poetry/bin:$PATH"
+eval "$(/Users/frodesundby/.local/bin/mise activate zsh)"
+nais completion zsh > $(brew --prefix)/share/zsh/site-functions/_nais
+autoload -U compinit; compinit
